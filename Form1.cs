@@ -88,7 +88,7 @@ namespace ContextPicker
             {
                 CheckBoxes = true,
                 Width = panelFolders.Width - 10,
-                Height = 180,
+                Height = 330,
                 Left = 0,
                 Top = txt.Height + 4,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right

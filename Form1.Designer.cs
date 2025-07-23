@@ -49,7 +49,7 @@ namespace ContextPicker
             panelFolders.AutoScroll = true;
             panelFolders.Location = new Point(12, 12);
             panelFolders.Name = "panelFolders";
-            panelFolders.Size = new Size(630, 341);
+            panelFolders.Size = new Size(630, 759);
             panelFolders.TabIndex = 0;
             // 
             // panelBottom
@@ -64,7 +64,7 @@ namespace ContextPicker
             panelBottom.Controls.Add(lblStatus);
             panelBottom.Controls.Add(txtOutputFile);
             panelBottom.Dock = DockStyle.Bottom;
-            panelBottom.Location = new Point(0, 420);
+            panelBottom.Location = new Point(0, 791);
             panelBottom.Name = "panelBottom";
             panelBottom.Size = new Size(654, 154);
             panelBottom.TabIndex = 2;
@@ -155,7 +155,7 @@ namespace ContextPicker
             // 
             // Form1
             // 
-            ClientSize = new Size(654, 574);
+            ClientSize = new Size(654, 945);
             Controls.Add(panelFolders);
             Controls.Add(panelBottom);
             MinimumSize = new Size(670, 540);
