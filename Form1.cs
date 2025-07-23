@@ -588,21 +588,18 @@ namespace ContextPicker
                 }
                 else if (Directory.Exists(path))
                 {
-                    try
-                    {
-                        foreach (string file in Directory.GetFiles(path, "*", SearchOption.AllDirectories))
-                            files.Add(file);
-                    }
-                    catch { }
+                    // Only add the folder path itself (if you want), and then check children
+                    foreach (TreeNode child in node.Nodes)
+                        GetCheckedFiles(fc, child, files);
                 }
             }
             else
             {
                 foreach (TreeNode child in node.Nodes)
-                    if (child.Checked)
-                        GetCheckedFiles(fc, child, files);
+                    GetCheckedFiles(fc, child, files);
             }
         }
+
 
         private void btnExportCsv_Click(object sender, EventArgs e)
         {
@@ -653,19 +650,11 @@ namespace ContextPicker
             {
                 string type = Directory.Exists(path) ? "Folder" : "File";
                 checkedNodes.Add((path, type, contextName));
+                // Only recurse if not a file
                 if (Directory.Exists(path))
                 {
-                    try
-                    {
-                        foreach (string dir in Directory.GetDirectories(path, "*", SearchOption.AllDirectories))
-                            checkedNodes.Add((dir, "Folder", contextName));
-                        foreach (string file in Directory.GetFiles(path, "*", SearchOption.AllDirectories))
-                            checkedNodes.Add((file, "File", contextName));
-                    }
-                    catch
-                    {
-                        MessageBox.Show("Something went wrong when selecting folder structure.");
-                    }
+                    foreach (TreeNode child in node.Nodes)
+                        GetCheckedNodes(fc, child, checkedNodes, contextName);
                 }
             }
             else
@@ -674,6 +663,7 @@ namespace ContextPicker
                     GetCheckedNodes(fc, child, checkedNodes, contextName);
             }
         }
+
 
         private void OpenContainingFolder(string dir)
         {
