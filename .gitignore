@@ -15,7 +15,7 @@ venv/
 
 .vs/
 
-obj/Debug
+obj/Debug/
 
 # ─── OS / Editor ────────────────────────────────────────
 .DS_Store
