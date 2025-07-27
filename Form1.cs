@@ -218,7 +218,31 @@ namespace ContextPicker
                 fc.CheckedStates.Clear();
                 fc.TreeView.Nodes.Clear();
 
-                var rootNode = CreateDirectoryNode(rootPath, true);
+                // Show the selected folder as the only root, but only its contents are visible under it
+                var rootNode = new TreeNode(new DirectoryInfo(rootPath).Name)
+                {
+                    Tag = rootPath,
+                    ToolTipText = rootPath
+                };
+
+                // Add immediate subfolders and files as children
+                try
+                {
+                    foreach (var dir in Directory.GetDirectories(rootPath))
+                    {
+                        var di = new DirectoryInfo(dir);
+                        if ((di.Attributes & FileAttributes.Hidden) == 0)
+                            rootNode.Nodes.Add(CreateDirectoryNode(dir, false));
+                    }
+                    foreach (var file in Directory.GetFiles(rootPath))
+                    {
+                        var fi = new FileInfo(file);
+                        if ((fi.Attributes & FileAttributes.Hidden) == 0)
+                            rootNode.Nodes.Add(CreateDirectoryNode(file, false));
+                    }
+                }
+                catch { /* silently ignore errors */ }
+
                 fc.TreeView.Nodes.Add(rootNode);
                 rootNode.Expand();
 
@@ -232,7 +256,7 @@ namespace ContextPicker
             }
         }
 
-        // Recursively creates directory node and all children (to support check/uncheck of non-expanded nodes)
+        // Only ever called for children, never for the root itself
         private TreeNode CreateDirectoryNode(string fullPath, bool loadChildren = false)
         {
             if (Directory.Exists(fullPath))
@@ -264,6 +288,7 @@ namespace ContextPicker
                 }
                 else
                 {
+                    // Add dummy node for expansion
                     node.Nodes.Add(new TreeNode("Loading..."));
                 }
                 return node;
@@ -580,6 +605,7 @@ namespace ContextPicker
         private void GetCheckedFiles(FolderContext fc, TreeNode node, List<string> files)
         {
             string path = GetNodePath(node);
+
             if (node.Checked)
             {
                 if (File.Exists(path))
@@ -588,7 +614,6 @@ namespace ContextPicker
                 }
                 else if (Directory.Exists(path))
                 {
-                    // Only add the folder path itself (if you want), and then check children
                     foreach (TreeNode child in node.Nodes)
                         GetCheckedFiles(fc, child, files);
                 }
@@ -601,6 +626,8 @@ namespace ContextPicker
         }
 
 
+
+
         private void btnExportCsv_Click(object sender, EventArgs e)
         {
             if (folderContexts.Count == 0)
@@ -608,62 +635,173 @@ namespace ContextPicker
                 MessageBox.Show("No folders loaded!", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
+
             if (string.IsNullOrEmpty(exportPath) || !Directory.Exists(exportPath))
             {
                 MessageBox.Show("Please set a valid export folder first.", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
+
             string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
             string csvFile = Path.Combine(exportPath, $"Selections_{timestamp}.csv");
 
             var checkedNodes = new List<(string path, string type, string contextName)>();
+
             foreach (var fc in folderContexts)
             {
-                string contextName = fc.NameBox.Text.Trim();
-                if (string.IsNullOrWhiteSpace(contextName) && !string.IsNullOrEmpty(fc.CurrentRootPath))
-                    contextName = new DirectoryInfo(fc.CurrentRootPath).Name;
+                string contextName = string.IsNullOrWhiteSpace(fc.NameBox.Text)
+                    ? Path.GetFileName(fc.CurrentRootPath)
+                    : fc.NameBox.Text;
+
                 if (fc.TreeView.Nodes.Count > 0)
-                    GetCheckedNodes(fc, fc.TreeView.Nodes[0], checkedNodes, contextName);
+                {
+                    foreach (TreeNode node in fc.TreeView.Nodes)
+                    {
+                        CollectExplicitlyCheckedNodes(node, checkedNodes, contextName);
+                    }
+                }
             }
 
-            try
+            using var sw = new StreamWriter(csvFile, false, Encoding.UTF8);
+            sw.WriteLine("ExportPath,ContextName,Path,Type");
+
+            foreach (var (path, type, contextName) in checkedNodes)
             {
-                using var sw = new StreamWriter(csvFile, false, Encoding.UTF8);
-                sw.WriteLine("ExportPath,ContextName,Path,Type");
-                foreach (var (path, type, contextName) in checkedNodes)
-                {
-                    sw.WriteLine($"\"{exportPath.Replace("\"", "\"\"")}\",\"{contextName.Replace("\"", "\"\"")}\",\"{path.Replace("\"", "\"\"")}\",{type}");
-                }
-                lblStatus.Text = "Selection exported!";
-                OpenContainingFolder(exportPath);
+                sw.WriteLine($"\"{exportPath.Replace("\"", "\"\"")}\",\"{contextName.Replace("\"", "\"\"")}\",\"{path.Replace("\"", "\"\"")}\",{type}");
             }
-            catch (Exception ex)
+
+            lblStatus.Text = "Selection exported!";
+            OpenContainingFolder(exportPath);
+        }
+
+        private void CollectAllCheckedChildren(TreeNode node, List<(string path, string type, string contextName)> checkedNodes, string contextName)
+        {
+            foreach (TreeNode child in node.Nodes)
             {
-                lblStatus.Text = $"CSV Export Error: {ex.Message}";
+                if (child.Checked)
+                {
+                    string path = child.Tag?.ToString() ?? "";
+                    string type = Directory.Exists(path) ? "Folder" : "File";
+                    checkedNodes.Add((path, type, contextName));
+
+                    CollectAllCheckedChildren(child, checkedNodes, contextName);
+                }
             }
         }
 
-        private void GetCheckedNodes(FolderContext fc, TreeNode node, List<(string, string, string)> checkedNodes, string contextName)
+        private void CollectExplicitlyCheckedNodes(TreeNode node, List<(string path, string type, string contextName)> checkedNodes, string contextName)
         {
-            string path = GetNodePath(node);
-            if (node.Checked)
+            string path = node.Tag?.ToString() ?? "";
+
+            if (node.Checked && (node.Parent == null || !node.Parent.Checked))
             {
                 string type = Directory.Exists(path) ? "Folder" : "File";
                 checkedNodes.Add((path, type, contextName));
-                // Only recurse if not a file
-                if (Directory.Exists(path))
-                {
-                    foreach (TreeNode child in node.Nodes)
-                        GetCheckedNodes(fc, child, checkedNodes, contextName);
-                }
+
+                // Recursively add all checked child nodes
+                CollectAllCheckedChildren(node, checkedNodes, contextName);
             }
             else
             {
+                // Continue recursion
                 foreach (TreeNode child in node.Nodes)
-                    GetCheckedNodes(fc, child, checkedNodes, contextName);
+                {
+                    CollectExplicitlyCheckedNodes(child, checkedNodes, contextName);
+                }
             }
         }
 
+
+        private void GetCheckedNodes(TreeNodeCollection nodes, List<(string path, string type, string contextName)> checkedNodes, string contextName)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                string path = node.Tag?.ToString() ?? string.Empty;
+                bool explicitlyChecked = node.Checked && (node.Parent == null || !node.Parent.Checked);
+
+                if (explicitlyChecked)
+                {
+                    string type = Directory.Exists(path) ? "Folder" : "File";
+                    checkedNodes.Add((path, type, contextName));
+                }
+
+                GetCheckedNodes(node.Nodes, checkedNodes, contextName);
+            }
+        }
+
+
+
+        private void importSection_Button_Click(object sender, EventArgs e)
+        {
+            using OpenFileDialog ofd = new()
+            {
+                Title = "Select a CSV Export File",
+                Filter = "CSV Export (*.csv)|*.csv|All Files (*.*)|*.*"
+            };
+
+            if (ofd.ShowDialog() != DialogResult.OK)
+                return;
+
+            var lines = File.ReadAllLines(ofd.FileName);
+            if (lines.Length < 2)
+            {
+                MessageBox.Show("CSV is empty or invalid.", "Import Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            var groupedEntries = lines.Skip(1)
+                .Select(ParseCsvRow)
+                .Where(cols => cols.Length == 4)
+                .Select(cols => new
+                {
+                    ExportFolder = cols[0].Trim('"'),
+                    ContextName = cols[1].Trim('"'),
+                    Path = cols[2].Trim('"'),
+                    Type = cols[3].Trim('"')
+                })
+                .GroupBy(x => x.ContextName)
+                .ToList();
+
+            foreach (var group in groupedEntries)
+            {
+                string contextName = group.Key;
+                string contextRoot = group.First().Path;  // This IS the intended root folder
+
+
+                if (!Directory.Exists(contextRoot))
+                {
+                    MessageBox.Show($"Root folder '{contextRoot}' for context '{contextName}' does not exist.", "Import Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    continue;
+                }
+
+                AddFolderContextUI(contextRoot);
+                var fc = folderContexts.Last();
+                fc.NameBox.Text = contextName;
+
+                fc.TreeView.Invoke(() =>
+                {
+                    ClearAllChecks(fc.TreeView.Nodes);
+
+                    var pathsToCheck = new HashSet<string>(group.Select(x => x.Path), StringComparer.OrdinalIgnoreCase);
+                    CheckOnlyExactNodes(fc.TreeView.Nodes, pathsToCheck);
+                });
+            }
+        }
+        private void CheckOnlyExactNodes(TreeNodeCollection nodes, HashSet<string> pathsToCheck)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                string nodePath = node.Tag?.ToString() ?? "";
+                node.Checked = pathsToCheck.Contains(nodePath);
+
+                CheckOnlyExactNodes(node.Nodes, pathsToCheck);
+
+                if (!node.Checked && node.Nodes.Cast<TreeNode>().Any(child => child.Checked))
+                {
+                    node.Checked = true;
+                }
+            }
+        }
 
         private void OpenContainingFolder(string dir)
         {
@@ -675,108 +813,30 @@ namespace ContextPicker
             catch { }
         }
 
-        private void importSection_Button_Click(object sender, EventArgs e)
+        private void ClearAllChecks(TreeNodeCollection nodes)
         {
-            try
+            foreach (TreeNode node in nodes)
             {
-                using (OpenFileDialog ofd = new OpenFileDialog())
-                {
-                    ofd.Title = "Select a CSV Export File";
-                    ofd.Filter = "CSV Export (*.csv)|*.csv|All Files (*.*)|*.*";
-                    if (ofd.ShowDialog() != DialogResult.OK)
-                        return;
-
-                    var csvPath = ofd.FileName;
-                    // Read all lines and parse
-                    var lines = File.ReadAllLines(csvPath);
-                    if (lines.Length < 2)
-                    {
-                        MessageBox.Show("CSV is empty or invalid.", "Import Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        return;
-                    }
-
-                    // We'll parse all rows into: ContextName, RootFolder, Paths
-                    // Group rows by (ContextName, RootFolder)
-                    var sectionDict = new Dictionary<(string, string), List<(string Path, string Type)>>();
-
-                    for (int i = 1; i < lines.Length; i++) // skip header
-                    {
-                        var line = lines[i];
-                        if (string.IsNullOrWhiteSpace(line)) continue;
-
-                        // Parse CSV, handling quoted values and commas in paths
-                        string[] cols = ParseCsvRow(line);
-                        if (cols.Length < 4) continue;
-
-                        string exportFolder = cols[0].Trim('"');
-                        string contextName = cols[1].Trim('"');
-                        string path = cols[2].Trim('"');
-                        string type = cols[3].Trim('"');
-
-                        // Only consider valid file/folder entries
-                        if (string.IsNullOrWhiteSpace(contextName) || string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(type))
-                            continue;
-
-                        // Root is always the very first entry for each context (or the shortest path)
-                        // We'll treat the shortest path as the root
-                        var sectionKey = (contextName, FindRootFromContext(contextName, path, sectionDict));
-
-                        // If not in dict yet, store initial root as this path
-                        if (!sectionDict.ContainsKey(sectionKey))
-                            sectionDict[sectionKey] = new List<(string, string)>();
-
-                        sectionDict[sectionKey].Add((path, type));
-                    }
-
-                    // For each context, add as a new folder context UI and set checks
-                    foreach (var kv in sectionDict)
-                    {
-                        string contextName = kv.Key.Item1;
-                        string rootFolder = kv.Key.Item2;
-                        var allEntries = kv.Value;
-
-                        // Skip if already loaded
-                        if (folderContexts.Any(fc => string.Equals(fc.CurrentRootPath, rootFolder, StringComparison.OrdinalIgnoreCase)))
-                            continue;
-
-                        // Verify root exists
-                        if (!Directory.Exists(rootFolder))
-                        {
-                            MessageBox.Show(
-                                $"The root folder '{rootFolder}' for context '{contextName}' does not exist. Skipping.",
-                                "Import Error",
-                                MessageBoxButtons.OK,
-                                MessageBoxIcon.Warning);
-                            continue;
-                        }
-
-                        // Add the section UI
-                        AddFolderContextUI(rootFolder);
-                        // Find the just-added FolderContext
-                        var fc = folderContexts.LastOrDefault();
-                        if (fc == null)
-                            continue;
-                        // Set the context name if present
-                        if (!string.IsNullOrWhiteSpace(contextName))
-                            fc.NameBox.Text = contextName;
-
-                        // Wait for the tree to load (ensures UI thread)
-                        fc.TreeView.Invoke(new Action(() =>
-                        {
-                            // Build a hashset for fast path lookup
-                            var checkedSet = new HashSet<string>(
-                                allEntries.Where(e => e.Type == "File" || e.Type == "Folder").Select(e => e.Path),
-                                StringComparer.OrdinalIgnoreCase);
-
-                            // Recursively check nodes based on imported CSV paths
-                            CheckNodesByPath(fc.TreeView.Nodes, checkedSet);
-                        }));
-                    }
-                }
+                node.Checked = false;
+                ClearAllChecks(node.Nodes);
             }
-            catch (Exception ex)
+        }
+        private void CheckOnlySpecifiedNodes(TreeNodeCollection nodes, HashSet<string> pathsToCheck)
+        {
+            foreach (TreeNode node in nodes)
             {
-                MessageBox.Show("Failed to import sections:\n" + ex.Message, "Import Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                string nodePath = node.Tag?.ToString() ?? "";
+                node.Checked = pathsToCheck.Contains(nodePath);
+
+                // Expand nodes if necessary
+                if (node.Nodes.Count > 0)
+                    CheckOnlySpecifiedNodes(node.Nodes, pathsToCheck);
+
+                // Ensure parent nodes are partially checked
+                if (!node.Checked && node.Nodes.Cast<TreeNode>().Any(child => child.Checked))
+                {
+                    node.Checked = true;
+                }
             }
         }
 
@@ -794,28 +854,21 @@ namespace ContextPicker
             return shortest.Item2;
         }
 
-        // Helper: CSV parsing supporting quoted commas
-        private string[] ParseCsvRow(string line)
+        private static string[] ParseCsvRow(string line)
         {
             var values = new List<string>();
             var sb = new StringBuilder();
             bool inQuotes = false;
-            for (int i = 0; i < line.Length; i++)
+
+            foreach (char c in line)
             {
-                char c = line[i];
-                if (c == '\"')
-                {
-                    inQuotes = !inQuotes;
-                }
+                if (c == '"') inQuotes = !inQuotes;
                 else if (c == ',' && !inQuotes)
                 {
                     values.Add(sb.ToString());
                     sb.Clear();
                 }
-                else
-                {
-                    sb.Append(c);
-                }
+                else sb.Append(c);
             }
             values.Add(sb.ToString());
             return values.ToArray();
