@@ -40,6 +40,7 @@ namespace ContextPicker
             progressBar = new ProgressBar();
             lblStatus = new Label();
             txtOutputFile = new TextBox();
+            contextIgnoreCheckBox = new CheckBox();
             panelBottom.SuspendLayout();
             SuspendLayout();
             // 
@@ -54,6 +55,7 @@ namespace ContextPicker
             // 
             // panelBottom
             // 
+            panelBottom.Controls.Add(contextIgnoreCheckBox);
             panelBottom.Controls.Add(importSection_Button);
             panelBottom.Controls.Add(btnExportPath);
             panelBottom.Controls.Add(lblExportPath);
@@ -130,7 +132,7 @@ namespace ContextPicker
             // 
             // progressBar
             // 
-            progressBar.Location = new Point(10, 122);
+            progressBar.Location = new Point(320, 95);
             progressBar.Name = "progressBar";
             progressBar.Size = new Size(286, 20);
             progressBar.TabIndex = 6;
@@ -138,7 +140,7 @@ namespace ContextPicker
             // lblStatus
             // 
             lblStatus.AutoSize = true;
-            lblStatus.Location = new Point(302, 127);
+            lblStatus.Location = new Point(320, 77);
             lblStatus.Name = "lblStatus";
             lblStatus.Size = new Size(39, 15);
             lblStatus.TabIndex = 7;
@@ -152,6 +154,17 @@ namespace ContextPicker
             txtOutputFile.ReadOnly = true;
             txtOutputFile.Size = new Size(320, 23);
             txtOutputFile.TabIndex = 8;
+            // 
+            // contextIgnoreCheckBox
+            // 
+            contextIgnoreCheckBox.AutoSize = true;
+            contextIgnoreCheckBox.Location = new Point(12, 122);
+            contextIgnoreCheckBox.Name = "contextIgnoreCheckBox";
+            contextIgnoreCheckBox.Size = new Size(185, 19);
+            contextIgnoreCheckBox.TabIndex = 13;
+            contextIgnoreCheckBox.Text = "Import / export .contextIgnore";
+            contextIgnoreCheckBox.UseVisualStyleBackColor = true;
+            contextIgnoreCheckBox.CheckedChanged += contextIgnoreCheckBox_CheckedChanged;
             // 
             // Form1
             // 
@@ -167,5 +180,6 @@ namespace ContextPicker
 
         }
         private Button importSection_Button;
+        private CheckBox contextIgnoreCheckBox;
     }
 }

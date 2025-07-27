@@ -642,8 +642,49 @@ namespace ContextPicker
                 return;
             }
 
-            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            string csvFile = Path.Combine(exportPath, $"Selections_{timestamp}.csv");
+            // ----- contextIgnore Export Mode -----
+            if (contextIgnoreCheckBox.Checked)
+            {
+                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+
+                foreach (var fc in folderContexts)
+                {
+                    string contextName = string.IsNullOrWhiteSpace(fc.NameBox.Text)
+                        ? Path.GetFileName(fc.CurrentRootPath)
+                        : fc.NameBox.Text;
+
+                    if (string.IsNullOrEmpty(fc.CurrentRootPath) || !Directory.Exists(fc.CurrentRootPath))
+                        continue;
+
+                    // 1. Gather all files and folders (relative to root)
+                    var allPaths = new List<string>();
+                    GetAllRelativePaths(fc.CurrentRootPath, fc.CurrentRootPath, allPaths);
+
+                    // 2. Gather all checked paths (relative to root)
+                    var checkedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    if (fc.TreeView.Nodes.Count > 0)
+                        GetCheckedRelativePaths(fc.CurrentRootPath, fc.TreeView.Nodes[0], checkedPaths);
+
+                    // 3. Not checked = to be ignored (relative paths)
+                    var notCheckedPaths = allPaths.Where(p => !checkedPaths.Contains(p)).ToList();
+
+                    // 4. Write .contextIgnore file (root as first line, then ignore list)
+                    string ignoreFile = Path.Combine(exportPath, $"{contextName}_contextIgnore_{timestamp}.contextIgnore");
+                    using (var sw = new StreamWriter(ignoreFile, false, Encoding.UTF8))
+                    {
+                        sw.WriteLine(fc.CurrentRootPath); // Root as first line
+                        foreach (var p in notCheckedPaths)
+                            sw.WriteLine(p);
+                    }
+                    lblStatus.Text = $"Exported .contextIgnore for \"{contextName}\"!";
+                }
+                OpenContainingFolder(exportPath);
+                return;
+            }
+
+            // ----- Standard CSV Export (Unchanged) -----
+            string timestampCsv = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string csvFile = Path.Combine(exportPath, $"Selections_{timestampCsv}.csv");
 
             var checkedNodes = new List<(string path, string type, string contextName)>();
 
@@ -662,17 +703,86 @@ namespace ContextPicker
                 }
             }
 
-            using var sw = new StreamWriter(csvFile, false, Encoding.UTF8);
-            sw.WriteLine("ExportPath,ContextName,Path,Type");
+            using var swCsv = new StreamWriter(csvFile, false, Encoding.UTF8);
+            swCsv.WriteLine("ExportPath,ContextName,Path,Type");
 
             foreach (var (path, type, contextName) in checkedNodes)
             {
-                sw.WriteLine($"\"{exportPath.Replace("\"", "\"\"")}\",\"{contextName.Replace("\"", "\"\"")}\",\"{path.Replace("\"", "\"\"")}\",{type}");
+                swCsv.WriteLine($"\"{exportPath.Replace("\"", "\"\"")}\",\"{contextName.Replace("\"", "\"\"")}\",\"{path.Replace("\"", "\"\"")}\",{type}");
             }
 
             lblStatus.Text = "Selection exported!";
             OpenContainingFolder(exportPath);
         }
+
+
+        // Recursively collect all relative paths (file & folder) from rootPath
+        private void GetAllRelativePaths(string rootPath, string current, List<string> relPaths)
+        {
+            foreach (var dir in Directory.GetDirectories(current))
+            {
+                var di = new DirectoryInfo(dir);
+                if ((di.Attributes & FileAttributes.Hidden) != 0)
+                    continue;
+                string rel = Path.GetRelativePath(rootPath, dir);
+                relPaths.Add(rel);
+                GetAllRelativePaths(rootPath, dir, relPaths);
+            }
+            foreach (var file in Directory.GetFiles(current))
+            {
+                var fi = new FileInfo(file);
+                if ((fi.Attributes & FileAttributes.Hidden) != 0)
+                    continue;
+                string rel = Path.GetRelativePath(rootPath, file);
+                relPaths.Add(rel);
+            }
+        }
+
+        // Recursively collect checked paths (as relative to root)
+        private void GetCheckedRelativePaths(string rootPath, TreeNode node, HashSet<string> relPaths)
+        {
+            string path = GetNodePath(node);
+            if (node.Checked)
+            {
+                if (File.Exists(path) || Directory.Exists(path))
+                {
+                    string rel = Path.GetRelativePath(rootPath, path);
+                    if (!string.IsNullOrEmpty(rel) && rel != "." && rel != string.Empty)
+                        relPaths.Add(rel);
+                }
+            }
+
+            foreach (TreeNode child in node.Nodes)
+                GetCheckedRelativePaths(rootPath, child, relPaths);
+        }
+
+        // Recursively check or uncheck all nodes
+        private void CheckAllRecursive(TreeNodeCollection nodes, bool isChecked)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                node.Checked = isChecked;
+                CheckAllRecursive(node.Nodes, isChecked);
+            }
+        }
+
+        // Uncheck all nodes whose relative path is in .contextIgnore set
+        private void UncheckIgnoredPaths(TreeNodeCollection nodes, string rootPath, HashSet<string> ignoreSet)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                string path = GetNodePath(node);
+                string rel = Path.GetRelativePath(rootPath, path);
+                if (ignoreSet.Contains(rel))
+                    node.Checked = false;
+
+                UncheckIgnoredPaths(node.Nodes, rootPath, ignoreSet);
+            }
+        }
+
+
+
+
 
         private void CollectAllCheckedChildren(TreeNode node, List<(string path, string type, string contextName)> checkedNodes, string contextName)
         {
@@ -733,16 +843,77 @@ namespace ContextPicker
 
         private void importSection_Button_Click(object sender, EventArgs e)
         {
-            using OpenFileDialog ofd = new()
+            // If contextIgnore mode is checked, use .contextIgnore logic
+            if (contextIgnoreCheckBox.Checked)
+            {
+                using OpenFileDialog ofd = new()
+                {
+                    Title = "Select one or more .contextIgnore Files",
+                    Filter = "ContextIgnore (*.contextIgnore)|*.contextIgnore|All Files (*.*)|*.*",
+                    Multiselect = true
+                };
+
+                if (ofd.ShowDialog() != DialogResult.OK)
+                    return;
+
+                int importedCount = 0;
+
+                foreach (var file in ofd.FileNames)
+                {
+                    var ignoreFileLines = File.ReadAllLines(file);
+                    if (ignoreFileLines.Length == 0)
+                    {
+                        MessageBox.Show($"{Path.GetFileName(file)} is empty or invalid.", "Import Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        continue;
+                    }
+                    string importedRoot = ignoreFileLines[0].Trim();
+                    if (!Directory.Exists(importedRoot))
+                    {
+                        MessageBox.Show($"Root folder '{importedRoot}' (from {Path.GetFileName(file)}) does not exist.", "Import Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        continue;
+                    }
+                    var ignoreLines = ignoreFileLines.Skip(1)
+                        .Select(line => line.Trim())
+                        .Where(line => !string.IsNullOrEmpty(line))
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    // Use context name from file name
+                    string importedContextName = Path.GetFileNameWithoutExtension(
+                        Path.GetFileNameWithoutExtension(Path.GetFileName(file)).Replace("_contextIgnore_", "_").Trim('_')
+                    );
+
+                    AddFolderContextUI(importedRoot);
+                    var fc = folderContexts.Last();
+                    fc.NameBox.Text = importedContextName;
+
+                    // By default, check EVERYTHING except those listed in .contextIgnore
+                    fc.TreeView.Invoke(() =>
+                    {
+                        CheckAllRecursive(fc.TreeView.Nodes, true);
+                        UncheckIgnoredPaths(fc.TreeView.Nodes, importedRoot, ignoreLines);
+                    });
+
+                    importedCount++;
+                }
+
+                if (importedCount > 0)
+                    lblStatus.Text = $".contextIgnore import: {importedCount} context(s) loaded.";
+                else
+                    lblStatus.Text = "No .contextIgnore files imported.";
+                return;
+            }
+
+            // --- Default CSV import logic (unchanged) ---
+            using OpenFileDialog csvOfd = new()
             {
                 Title = "Select a CSV Export File",
                 Filter = "CSV Export (*.csv)|*.csv|All Files (*.*)|*.*"
             };
 
-            if (ofd.ShowDialog() != DialogResult.OK)
+            if (csvOfd.ShowDialog() != DialogResult.OK)
                 return;
 
-            var lines = File.ReadAllLines(ofd.FileName);
+            var lines = File.ReadAllLines(csvOfd.FileName);
             if (lines.Length < 2)
             {
                 MessageBox.Show("CSV is empty or invalid.", "Import Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -765,8 +936,7 @@ namespace ContextPicker
             foreach (var group in groupedEntries)
             {
                 string contextName = group.Key;
-                string contextRoot = group.First().Path;  // This IS the intended root folder
-
+                string contextRoot = group.First().Path;
 
                 if (!Directory.Exists(contextRoot))
                 {
@@ -787,6 +957,11 @@ namespace ContextPicker
                 });
             }
         }
+
+
+
+
+
         private void CheckOnlyExactNodes(TreeNodeCollection nodes, HashSet<string> pathsToCheck)
         {
             foreach (TreeNode node in nodes)
@@ -890,6 +1065,10 @@ namespace ContextPicker
             }
         }
 
+        private void contextIgnoreCheckBox_CheckedChanged(object sender, EventArgs e)
+        {
+
+        }
     }
 
     internal class FolderContext : IDisposable
