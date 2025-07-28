@@ -457,8 +457,42 @@ namespace ContextPicker
                     SaveCheckedStates(fc, fc.TreeView.Nodes.Count > 0 ? fc.TreeView.Nodes[0] : null);
                     LoadDirectoryTree(fc, fc.CurrentRootPath);
                     RestoreCheckedStates(fc, fc.TreeView.Nodes.Count > 0 ? fc.TreeView.Nodes[0] : null);
+
+                    // Ensure any new nodes under checked parents get checked (for contextIgnore logic)
+                    if (fc.TreeView.Nodes.Count > 0)
+                    {
+                        EnsureNewChildrenChecked(fc.TreeView.Nodes[0], fc);
+                    }
+
                     lblStatus.Text = $"Folder added: {e.FullPath}";
                 }));
+            }
+        }
+        private void EnsureNewChildrenChecked(TreeNode node, FolderContext fc)
+        {
+            // Only if this node is checked (parent)
+            if (node.Checked)
+            {
+                foreach (TreeNode child in node.Nodes)
+                {
+                    string path = GetNodePath(child);
+                    // If the child's checked state was not previously recorded (i.e., it's new)
+                    if (!fc.CheckedStates.ContainsKey(path))
+                    {
+                        child.Checked = true;
+                        fc.CheckedStates[path] = true;
+                    }
+                    // Continue recursively in case of nested new folders
+                    EnsureNewChildrenChecked(child, fc);
+                }
+            }
+            else
+            {
+                // If parent is not checked, do not auto-check children
+                foreach (TreeNode child in node.Nodes)
+                {
+                    EnsureNewChildrenChecked(child, fc);
+                }
             }
         }
 
