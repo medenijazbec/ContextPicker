@@ -1,4 +1,4 @@
-# ContextPicker
+# ContextPicker -> User master branch for up to date code, im too lazy to prune stuff from main atm
 
 **ContextPicker** is a Windows Forms utility for interactively selecting, naming, and exporting context dumps of files from up to 5 folders at once.
 It is especially useful for preparing data for AI models, code review, or other batch analysis.
