@@ -13,6 +13,7 @@ namespace ContextPicker
         private const int MaxContexts = 5;
         private readonly List<FolderContext> folderContexts = new();
         private string? exportPath = null;
+        private string? lastImportedContextIgnoreFile = null;
 
         public Form1()
         {
@@ -927,6 +928,7 @@ namespace ContextPicker
                         UncheckIgnoredPaths(fc.TreeView.Nodes, importedRoot, ignoreLines);
                     });
 
+                    lastImportedContextIgnoreFile = file; // Set the latest file (last one processed)
                     importedCount++;
                 }
 
@@ -1103,6 +1105,73 @@ namespace ContextPicker
         {
 
         }
+
+        private async void refreshGenerateButton_Click(object sender, EventArgs e)
+        {
+            // Only operate if contextIgnoreCheckBox is checked
+            if (contextIgnoreCheckBox.Checked)
+            {
+                // Make sure we have a last imported contextIgnore file
+                if (string.IsNullOrEmpty(lastImportedContextIgnoreFile) || !File.Exists(lastImportedContextIgnoreFile))
+                {
+                    MessageBox.Show("No .contextIgnore file has been imported yet.", "Refresh", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                // Parse the .contextIgnore file again
+                var ignoreFileLines = File.ReadAllLines(lastImportedContextIgnoreFile);
+                if (ignoreFileLines.Length == 0)
+                {
+                    MessageBox.Show($"{Path.GetFileName(lastImportedContextIgnoreFile)} is empty or invalid.", "Import Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+                string importedRoot = ignoreFileLines[0].Trim();
+                if (!Directory.Exists(importedRoot))
+                {
+                    MessageBox.Show($"Root folder '{importedRoot}' (from {Path.GetFileName(lastImportedContextIgnoreFile)}) does not exist.", "Import Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+                var ignoreLines = ignoreFileLines.Skip(1)
+                    .Select(line => line.Trim())
+                    .Where(line => !string.IsNullOrEmpty(line))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                // Use context name from file name
+                string importedContextName = Path.GetFileNameWithoutExtension(
+                    Path.GetFileNameWithoutExtension(Path.GetFileName(lastImportedContextIgnoreFile)).Replace("_contextIgnore_", "_").Trim('_')
+                );
+
+                // Remove the last context UI if present (so the refresh replaces it)
+                if (folderContexts.Count > 0 && folderContexts.Last().CurrentRootPath == importedRoot)
+                {
+                    var fcOld = folderContexts.Last();
+                    fcOld.Dispose();
+                    folderContexts.Remove(fcOld);
+                    panelFolders.Controls.Remove(fcOld.Panel);
+                }
+
+                // Re-import (add new UI, check everything except ignore set)
+                AddFolderContextUI(importedRoot);
+                var fc = folderContexts.Last();
+                fc.NameBox.Text = importedContextName;
+
+                fc.TreeView.Invoke(() =>
+                {
+                    CheckAllRecursive(fc.TreeView.Nodes, true);
+                    UncheckIgnoredPaths(fc.TreeView.Nodes, importedRoot, ignoreLines);
+                });
+
+                lblStatus.Text = $"Refreshed .contextIgnore: {importedContextName}";
+
+                // Now auto-run Generate Context (asynchronous)
+                btnGenerateContext_Click(sender, e); // This is an async void
+            }
+            else
+            {
+                MessageBox.Show("This refresh is only available in .contextIgnore mode.", "Refresh", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
     }
 
     internal class FolderContext : IDisposable
